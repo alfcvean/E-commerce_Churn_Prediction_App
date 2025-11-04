@@ -1,10 +1,36 @@
+# Shim classes for unpickling (ensure available before pickle.load)
+class ChurnXGBCWConfig:
+    pass
+
+class ChurnXGBCWPipeline:
+    pass
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle, sys
+import pickle, sys, importlib
 from pathlib import Path
 from typing import Tuple, List
+import json
 
+THR_PATH = Path(__file__).resolve().parent.parent / "artifacts" / "best_threshold.json"
+
+def read_persisted_threshold(default=0.50):
+    try:
+        if THR_PATH.exists():
+            data = json.loads(THR_PATH.read_text())
+            return float(data.get("threshold", default))
+    except Exception:
+        pass
+    return default
+
+def persist_threshold(value: float):
+    try:
+        THR_PATH.parent.mkdir(parents=True, exist_ok=True)
+        THR_PATH.write_text(json.dumps({"threshold": float(value)}))
+    except Exception:
+        pass
+    
 # Column alias mapping for typos
 ALIAS_MAP = {
     "PreferredOrderCat": "PreferedOrderCat",
@@ -25,6 +51,67 @@ def _ensure_pickle_compat():
         class ChurnXGBCWPipeline: ...
         setattr(main, "ChurnXGBCWPipeline", ChurnXGBCWPipeline)
 
+# compatibility patch for sklearn pickles across versions
+try:
+    ct_mod = importlib.import_module("sklearn.compose._column_transformer")
+    if not hasattr(ct_mod, "_RemainderColsList"):
+        class _RemainderColsList(list):
+            """Compat shim so old pickles with _RemainderColsList can be loaded."""
+            pass
+        ct_mod._RemainderColsList = _RemainderColsList
+except Exception:
+    pass
+
+def fix_xgb_base_score(xgb_model):
+    """
+    Robust fix untuk base_score XGBoost yang tersimpan sebagai string dengan bracket ('[5E-1]').
+    Bekerja untuk XGBoost 2.x/3.x dan aman dipanggil berulang (idempotent).
+    """
+    try:
+        if hasattr(xgb_model, "get_booster"):
+            booster = xgboost_model = xgb_model.get_booster()
+
+            raw = None
+            # 1) coba dari attributes()
+            try:
+                raw = (booster.attributes() or {}).get("base_score")
+            except Exception:
+                raw = None
+
+            # 2) kalau kosong, baca dari JSON config
+            if raw is None:
+                try:
+                    cfg = json.loads(booster.save_config())
+                    raw = (
+                        cfg.get("learner", {})
+                           .get("learner_model_param", {})
+                           .get("base_score")
+                    )
+                except Exception:
+                    raw = None
+
+            # 3) bersihkan bracket & set balik
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode("utf-8", errors="ignore")
+            if isinstance(raw, str):
+                s = raw.strip()
+                if s.startswith("[") and s.endswith("]"):
+                    s = s[1:-1].strip()     # "[5E-1]" -> "5E-1"
+                try:
+                    v = float(s)            # "5E-1" -> 0.5
+                    booster.set_param({"base_score": str(v)})
+                    booster.set_attr(base_score=str(v))
+                    try:
+                        xgb_model.set_params(base_score=v)
+                    except Exception:
+                        pass
+                    print(f"✅ Fixed XGBoost base_score: {raw} -> {v}")
+                except Exception as e:
+                    print(f"⚠️ Gagal parse base_score '{raw}': {e}")
+    except Exception as e:
+        print(f"⚠️ Could not fix base_score: {e}")
+    return xgb_model
+
 @st.cache_resource
 def load_pipeline(path: str = "artifacts/churn_xgb_cw.sav"):
     """
@@ -39,6 +126,12 @@ def load_pipeline(path: str = "artifacts/churn_xgb_cw.sav"):
         st.stop()
 
     _ensure_pickle_compat()
+    
+    # Suppress sklearn version warnings (safe for minor version differences)
+    import warnings
+    from sklearn.exceptions import InconsistentVersionWarning
+    warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
+    
     with open(path_obj, "rb") as f:
         obj = pickle.load(f)
 
@@ -49,15 +142,23 @@ def load_pipeline(path: str = "artifacts/churn_xgb_cw.sav"):
         pipe = obj
         cfg  = None
 
+    # 🔧 Fix XGBoost base_score issue before any predictions
+    if hasattr(pipe, "named_steps") and "model" in pipe.named_steps:
+        pipe.named_steps["model"] = fix_xgb_base_score(pipe.named_steps["model"])
+
     # label
     model_label = "XGBoost (Class-weight • Balanced)"
-    st.success(f"✅ Model loaded: {model_label}")
-
-    try:
-        if cfg and hasattr(cfg, "threshold"):
-            st.session_state.setdefault("threshold", float(cfg.threshold))
-    except Exception:
-        pass
+    
+    # 🎯 Set threshold from config (always override to ensure consistency)
+    if cfg and hasattr(cfg, "threshold"):
+        threshold_value = float(cfg.threshold)
+        st.session_state["threshold"] = threshold_value
+        st.success(f"✅ Model loaded: {model_label} (threshold: {threshold_value:.2f})")
+    else:
+        # Fallback: pakai persisted threshold kalau ada; kalau tidak, 0.50
+        if "threshold" not in st.session_state:
+            st.session_state["threshold"] = read_persisted_threshold(default=0.50)
+        st.success(f"✅ Model loaded: {model_label} (threshold: {st.session_state['threshold']:.2f})")
 
     return pipe, model_label, path_obj
 
@@ -124,36 +225,38 @@ def score(df: pd.DataFrame, pipeline, threshold: float = 0.5) -> Tuple[np.ndarra
         return probs, preds
     except Exception as e:
         st.error(f"Scoring failed: {e}")
+        import traceback
+        st.code(traceback.format_exc())
         return np.array([]), np.array([])
 
 def template_csv(pipeline, n_rows: int = 3) -> pd.DataFrame:
     """Generate template CSV with realistic dummy rows."""
     expected, num_cols, cat_cols = get_expected_cols(pipeline)
     templates = [
-        # JELAS CHURN 
+        # JELAS CHURN
         {
             "CustomerID": 999101,
             "Tenure": 0,
-            "Complain": 1,                 
-            "OrderCount": 5,              
-            "DaySinceLastOrder": 18,       
-            "CashbackAmount": 230.0,       
-            "HourSpendOnApp": 4.7,         
+            "Complain": 1,
+            "OrderCount": 5,
+            "DaySinceLastOrder": 18,
+            "CashbackAmount": 230.0,
+            "HourSpendOnApp": 4.7,
             "PreferredLoginDevice": "Computer",
             "PreferredPaymentMode": "UPI",
             "PreferedOrderCat": "Mobile Phone",
             "MaritalStatus": "Single",
             "CityTier": 3,
-            "WarehouseToHome": 50,         
-            "CouponUsed": 4,               
-            "SatisfactionScore": 4,        
+            "WarehouseToHome": 50,
+            "CouponUsed": 4,
+            "SatisfactionScore": 4,
             "NumberOfDeviceRegistered": 2,
             "NumberOfAddress": 2,
             "Gender": "Male",
             "OrderAmountHikeFromlastYear": 0.30
         },
 
-        # JELAS LOYAL 
+        # JELAS LOYAL
         {
             "CustomerID": 999102,
             "Tenure": 36,
@@ -179,10 +282,10 @@ def template_csv(pipeline, n_rows: int = 3) -> pd.DataFrame:
         # 50 : 50 (borderline)
         {
             "CustomerID": 999103,
-            "Tenure": 1,
+            "Tenure": 3,
             "Complain": 1,
             "OrderCount": 4,
-            "DaySinceLastOrder": 180,
+            "DaySinceLastOrder": 150,
             "CashbackAmount": 50.0,
             "HourSpendOnApp": 1.5,
             "PreferredLoginDevice": "Mobile Phone",
