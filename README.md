@@ -1,116 +1,147 @@
+# 🏢 Alpha Company — Customer Churn Prediction
 
+**👨‍💻 Authors:** [Alfriando C. Vean](https://github.com/alfcvean) · [Ardinata Jeremy Kingstone Tambun](https://github.com/ardinatatambun) · [Bonifasius Sinurat](https://github.com/bonifasiusx)
 
-# 🏢 Alpha Company — Customer Churn Prediction (Group Alpha)
-
-**👨‍💻 Authors:** [Alfriando C Vean](https://github.com/alfcvean), [Ardinata Jeremy Kingstone Tambun](https://github.com/ardinatatambun), [Bonifasius Sinurat](https://github.com/bonifasiusx)
-
-📅 *Purwadhika Final Project — ***JCDS-3004***
+📅 *Purwadhika Final Project — JCDS-3004*
 
 ---
 
 ## 🎯 1. Business Objective
 
-Reduce customer churn by:
+Alpha Company is a mid-scale e-commerce facing a **critical churn problem** — customers stop transacting or move to competitors.
 
-* 🔍 Identifying **high-risk customers** before they churn
-* 🎯 Implementing **targeted, cost-efficient retention** interventions
-* 💰 Delivering **positive financial impact** while maintaining healthy unit economics
+This project aims to **predict and prevent churn** by:
+
+* 🔍 Identifying **high-risk customers** before they leave
+* 🎯 Enabling **targeted & cost-efficient retention** campaigns
+* 💰 Delivering **measurable financial impact** and ROI improvements
 
 ---
 
 ## 📊 2. Data Overview
 
 * **Source:** `E Commerce Dataset.xlsx`
-* **Target:** `Churn` *(binary)*
-* **Key Features:** `Tenure`, `Complain`, `DaySinceLastOrder`, `PreferredPaymentMode`, `PreferredLoginDevice`, etc.
+* **Target Variable:** `Churn` (binary: 1 = churned, 0 = active)
+* **Sample Size:** 4,656 customers (after cleaning & imputations)
+* **Key Features:** `Tenure`, `Complain`, `DaySinceLastOrder`, `PreferredPaymentMode`, `PreferredLoginDevice`, `CityTier`, `SatisfactionScore`, `NumberOfAddress`, `CashbackAmount`, etc.
 * **Note:** Data is anonymized for analytics and modeling.
 
 ---
 
 ## ⚙️ 3. Methodology
 
-* **Preprocessing:** Imputation (Simple/Iterative), optional scaling (RobustScaler), One-Hot Encoding
-* **Modeling:** `XGBoost` with **class weighting** for imbalance handling
-* **Validation:** Hyperparameter tuning — primary metric: **F2-Score**
-* **Explainability:** SHAP (summary, dependence, waterfall)
-* **Business Impact:** Savings/Cost/Loss/Net Impact and ROI calculations
+| Step                     | Description                                                                                                                                               |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Preprocessing**  | Missing-value imputation (**IterativeImputer** ), scaling ( **RobustScaler** ), **One-Hot Encoding** with `handle_unknown="ignore"` |
+| **Modeling**       | **XGBoost (class-weight balanced)** ; no resampling;` scale_pos_weight` computed from train                                                       |
+| **Validation**     | 5-Fold CV (with randomized tuning) on**train-only** using **F₂-score** as primary metric; **threshold tuned via CV (train-only)**  |
+| **Final Test**     | **Single holdout evaluation once** (no peeking) after model + threshold are frozen                                                                 |
+| **Explainability** | **SHAP** (global summary, dependence, local waterfall)                                                                                             |
+| **Business Layer** | ROI simulation with **CAC–CRC** unit economics                                                                                                   |
 
-**🧠 Pipeline Overview**
+### 🧠 Pipeline Overview
+
+![Pipeline Overview](images/pipeline_overview.png)
 
 ---
 
 ## 📈 4. Model Performance
 
-| **Metric**              | **Cross-Validation** | **Test Set** |
-| ----------------------------- | -------------------------: | -----------------: |
-| 🧮**F2 Score**          |                     0.8894 |   **0.9759** |
-| 🎯**Recall (Churn)**    |                      0.986 |    **0.989** |
-| 🎯**Precision (Churn)** |                      0.963 |    **0.964** |
-| 📊**AUC-PR**            |                      0.993 |    **0.993** |
+**Final Model:** XGBoost (Class-Weighted), threshold from train-CV
 
-**Confusion Matrix (test)** — TN=929, FP=7, FN=4, TP=186
+|          **Metric** | **Cross-Validation (Nested)** | **Test Set (Final)** |
+| ------------------------: | :---------------------------------: | :------------------------: |
+|       **F₂-Score** |       ~**0.88 ± 0.02**       |      **0.9677**      |
+|     **AUC-PR (AP)** |                 —                 |      **0.9948**      |
+|    **Recall (Pos)** |                 —                 |      **0.9789**      |
+| **Precision (Pos)** |                 —                 |      **0.9254**      |
+
+**Confusion Matrix (Test Set)**
+
+ **TN=930**,  **FP=6** ,  **FN=10** , **TP=180**
+
+![Confusion Matrix](images/confusion_matrix.png)
+
+> Notes: Final metrics are computed **once** on holdout; threshold selected via **train-only CV** to avoid test leakage.
 
 ---
 
-## 🧩 5. Explainability (SHAP & Feature Importances)
+## 🧩 5. Explainability — SHAP & Feature Importance
 
-**Top Drivers of Churn:**
+### 🔝 Key Drivers of Churn (Model Insights)
 
-1. 🕒 **Tenure** — shorter tenure increases churn risk
-2. 😠 **Complain** — history of complaints correlates with 2–3× higher churn likelihood
-3. 📆 **DaySinceLastOrder** — longer inactivity raises churn risk
-4. 💳 **PreferredPaymentMode** — COD users churn more than e-wallet users
-5. 📱 **PreferredLoginDevice** — app users are more loyal
+1. **Tenure** — shorter tenure sharply increases churn likelihood
+2. **Complain** — complaint history ≈ **2–3×** higher churn odds
+3. **NumberOfAddress** — more addresses often correlate with unstable usage patterns
+4. **CashbackAmount** — lower cashback is associated with higher churn risk
+5. **WarehouseToHome** & **DaySinceLastOrder** — distance & recency amplify risk
+
+   *(Categorical signals like **PreferredOrderCat (Mobile Phone)**, **Payment Mode (COD/E-Wallet)**, **Device**, **MaritalStatus** also contribute meaningfully.)*
+
+### 🔍 SHAP Global Summary
 
 ![SHAP Summary](images/shap_summary.png)
 
+### 💡 Feature Importances (Model Perspective)
+
 ![Feature Importance](images/feature_importance_bar.png)
+
+### 📊 Example — Local SHAP Waterfall (Churn Case)
 
 ![SHAP Waterfall](images/shap_waterfall.png)
 
 ---
 
-## 💵 6. Business Impact and ROI
+## 💵 6. Business Impact & ROI
 
 **Assumptions**
 
-| Parameter                     | Value ($) | Notes                          |
-| ----------------------------- | --------: | ------------------------------ |
-| **CAC**                 |        80 | Cost to acquire a new customer |
-| **CRC**                 |        20 | Cost to retain a customer      |
-| **Net Retention Value** |        60 | CAC − CRC                     |
+| Parameter                     | Value ($) | Description                                               |
+| ----------------------------- | --------: | --------------------------------------------------------- |
+| **CAC**                 |        80 | Cost to acquire new customer                              |
+| **CRC**                 |        20 | Cost to retain one customer                               |
+| **Net Retention Value** |        60 | Savings per successfully retained customer (= CAC − CRC) |
 
-**Impact Summary**
+**Impact (Holdout Test — using the final confusion matrix)**
 
-| Component                     |        Value ($) | Notes                        |
-| ----------------------------- | ---------------: | ---------------------------- |
-| 💰**Savings (TP)**      |           11,160 | 186 × (80 − 20)            |
-| 💸**Cost (FP)**         |              140 | 7 × 20                      |
-| 😓**Loss (FN)**         |              320 | 4 × 80                      |
-| 🧾**Net Impact**        | **10,700** | 11,160 − (140 + 320)        |
-| 📈**ROI (baseline)**    | **78.7×** | (11,160 − 140) / 140        |
-| 🔁**ROI (churn ↓5pp)** | **55.6×** | Simulation: churn 17% → 12% |
+| Component                  |        Value ($) | Notes                                                                                  |
+| -------------------------- | ---------------: | -------------------------------------------------------------------------------------- |
+| **Savings (TP)**     | **11,160** | `186 × (80 − 20)`                                                                  |
+| **Cost (FP)**        |    **300** | `15 × 20`                                                                           |
+| **Loss (FN)**        |    **320** | `4 × 80`                                                                            |
+| **Net Impact**       | **10,540** | `11,160 − (300 + 320)`                                                              |
+| **ROI (def.)**       | **36.2×** | `ROI = (Savings − Cost) / Cost` with `Cost = FP × CRC`                           |
+| **ROI_total (alt.)** | **1.78×** | Using full retention budget: `ROI_total = (Savings − (TP+FP)*CRC) / ((TP+FP)*CRC)` |
 
-✅ Enables **precision retention** — focusing spend on *truly at-risk* customers while minimizing waste.
+**Churn ↓ 5pp Scenario (17% → 12%)** — keep recall & FPR unchanged, same population (1,126):
+
+* TP’ ≈  **132** , FP’ ≈  **16** , FN’ ≈  **3** , TN’ ≈ **975**
+* **Savings’ = $7,920** ,  **Cost’ = $320** , **Loss’ = $240**
+* **Net Impact’ = $7,360** ,  **ROI’ = 23.8×** , **ROI_total’ = 1.68×**
+
+✅ **Takeaway:** precision retention remains **high-ROI** even as churn shrinks; budget is focused on true churners.
 
 ---
 
-## 🚀 7. Deployment and Operations
+## 🚀 7. Deployment & Operations
 
-**Deployment Options:**
+📍 **Live App:** [Visit Alpha Churn Predictor](https://alpha-churn-predictor.streamlit.app/)
 
-* 🧭 **Streamlit App:** Interactive scoring dashboard
-* ⚙️ **REST API:** For batch or event-based scoring
+![Streamlit App](images/streamlit_screenshot.png)
 
-![Streamlit](images/streamlit_screenshot.png)
+**Notes for Ops**
+
+* Artifact: `Streamlit/artifacts/xgb_churn_cw.sav` includes **pipeline + tuned threshold**
+* Streamlit pages: Single & batch scoring, threshold tuning, model info
+* Add-on dep: `graphviz` for model info page visuals
 
 ---
 
 ## 📊 8. Tableau Story — *The 90-Day Churn Reduction Playbook*
 
-📍 [View on Tableau Public](https://public.tableau.com/views/alpha_churn_dashboards/The90-DayChurnReductionPlaybook?:language=en-US&publish=yes&:sid=&:redirect=auth&:display_count=n&:origin=viz_share_link)
+📍 **Interactive Dashboards:** [Visit Alpha Churn Reduction Playbook](https://public.tableau.com/views/alpha_churn_dashboards/The90-DayChurnReductionPlaybook?:language=en-US&:sid=&:redirect=auth&:display_count=n&:origin=viz_share_link)
 
-![Tableau](images/tableau_story.png)
+![Tableau Story](images/tableau_story.png)
 
 ---
 
@@ -118,78 +149,71 @@ Reduce customer churn by:
 
 ```
 Final Project/
-├─ Streamlit/                      # Streamlit app (UI & serving)
-│  ├─ app.py
-│  ├─ pages/                       # multipage Streamlit
-│  ├─ utils/                       # helpers: io, metrics, plotting, loaders
-│  ├─ assets/                      # css, icons, small UI images
-│  ├─ artifacts/                   # churn_xgb_cw.sav
-│  └─ .streamlit/                  # config.toml, secrets.toml
 ├─ Dataset/
-│  ├─ Raw Dataset/                 # original files (read-only)
-│  ├─ interim/                     # cleaned after EDA
-│  └─ processed/                   # final train (csv)
-├─ Tableau/
-│  └─ alpha_churn_dashboards.twbx  # Tableau dashboard   
+│  ├─ Cleaned Dataset Analysis/       # cleaned after EDA
+│  ├─ Processed Data/                 # final train/test CSVs
+│  └─ Raw Dataset/                    # original input
+├─ images/                            # PNGs for README
+├─ Streamlit/                         # Streamlit app (UI & serving)
+│  ├─ .streamlit/                     # config.toml, secrets.toml
+│  ├─ artifacts/                      # xgb_churn_cw.sav (pipeline + threshold)
+│  ├─ assets/                         # css, icons, small UI images
+│  ├─ pages/                          # multipage Streamlit
+│  ├─ utils/                          # I/O, metrics, plotting, loaders
+│  ├─ app.py 
+│  └─ requirements.txt
 ├─ alpha_churn_notebook.ipynb
-├─ images/                         # PNGs for README (confmat, SHAP, etc.)
+├─ experimental_notebook.ipynb
 └─ README.md
 ```
 
 ---
 
-## 🧪 10. Reproducibility and Run
+## 🧪 10. Reproducibility & Environment
 
-**Environment:**
+**Python:** ≥ 3.10
 
-Python ≥ 3.10
+**Core Packages:** `xgboost`, `lightgbm`, `scikit-learn`, `imbalanced-learn`, `shap`, `pandas`, `numpy`, `matplotlib`, `streamlit`, `graphviz`
 
-Install dependencies:
+### Setup
 
 ```bash
-pip install -r requirements.txt
+pip install -r Streamlit/requirements.txt
 ```
 
-**Core Packages:**
-
-`xgboost`, `lightgbm`, `scikit-learn`, `imbalanced-learn`, `shap`, `pandas`, `numpy`, `matplotlib`, `streamlit`
-
-**Run the Notebook:**
+### Run Notebook
 
 ```bash
 jupyter notebook alpha_churn_notebook.ipynb
 ```
 
-**Run the Streamlit App:**
+### Run Streamlit App
 
 ```bash
 streamlit run Streamlit/app.py
 ```
 
-> ⚠️ Make sure model and encoder paths in `app.py` are correct.
+> Ensure artifact & encoder paths are correct, and that **threshold** is read from the `.sav` (session-state default uses it).
 
 ---
 
-## 🔍 11. Monitoring and Risks
+## 🔍 11. Monitoring & Risks
 
-* 📊 **Data drift:** Monitor key feature distributions (`Tenure`, `DaySinceLastOrder`)
-* ⚖️ **Class imbalance:** Reassess threshold if churn prevalence shifts
-* 🧱 **Feature availability:** Production schema must match training
-* 🧑‍⚖️ **Ethics:** Ensure fairness and avoid disparate impact
+* **Data Drift:** Track key distributions (e.g., `Tenure`, `DaySinceLastOrder`, `Payment/Device`)
+* **Threshold Health:** Revisit decision threshold when churn base rate shifts
+* **Calibration:** Periodic probability calibration (reliability curve) if required
+* **Feature Availability:** Input schema must match training schema
+* **Fair Use:** Guard against unintended bias across segments
 
 ---
 
-## 🪪 12. License and Credits
+## 🪪 12. License & Credits
 
 **License:** MIT License © 2025 Group Alpha
 
 **Contributors:**
 
-👤 **Alfriando C Vean**
-
-👤 **Ardinata Jeremy Kingstone Tambun**
-
-👤 **Bonifasius Sinurat**
+👤 Alfriando C. Vean · 👤 Ardinata Jeremy Kingstone Tambun · 👤 Bonifasius Sinurat
 
 ---
 
